@@ -8,6 +8,16 @@ CypherTrace emulates vulnerable SSH and Web services to deceive attackers, log t
 
 Architecture
 The system is built on a decoupled Microservices Architecture to separate data ingestion from data analytics, ensuring high availability and scalability.
+wen attack <img width="1287" height="727" alt="webatta" src="https://github.com/user-attachments/assets/7e98a7de-72a0-448a-b2c7-3f3d73d3d6e8" />
+ssh attack <img width="1292" height="712" alt="ssh attcak" src="https://github.com/user-attachments/assets/314505f2-25cf-4c63-b1dc-3f4f9ae20270" />
+dashboard <img width="1272" height="677" alt="d" src="https://github.com/user-attachments/assets/1c6d3603-ff5f-4893-8765-7fa3120a8bcc" />
+<img width="1280" height="672" alt="event" src="https://github.com/user-attachments/assets/afe85ba5-007b-41d2-b408-755dc158cffe" />
+<img width="1270" height="672" alt="terminal op" src="https://github.com/user-attachments/assets/dc08fc43-7cdb-485d-b58a-6af19fa93331" />
+
+
+
+
+
 
 Decoy Layer:
 decoy.server.py: A multi-threaded TCP socket server emulating an SSH terminal on Port 3333. It features a rule-based command parser that generates realistic Linux outputs to increase attacker dwell time.
