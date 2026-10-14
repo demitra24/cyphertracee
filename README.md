@@ -37,7 +37,7 @@ To run this project locally, follow these steps:
 
 1.Clone the repository:
 bash
-:git clone https://github.com/YOUR_USERNAME/cyphertrace.git
+:git clone https://github.com/demitra24/cyphertrace.git
 cd cyphertrace
 
 2.Install Python dependencies:
